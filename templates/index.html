@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dahod Mini Bus Transit Hub</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; font-family: -apple-system, sans-serif; background: #f3f4f6; overflow: hidden; }
+        #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; z-index: 1; background: #e5e7eb; }
+        
+        .dashboard {
+            position: absolute; top: 12px; left: 12px; right: 12px; max-width: 400px;
+            background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.15);
+            z-index: 1000; display: flex; flex-direction: column; gap: 12px;
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .title { font-size: 18px; font-weight: 700; color: #111827; }
+        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #dcfce7; color: #166534; }
+        select { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: #f9fafb; font-weight: 500; cursor: pointer; }
+        .btn-schedule { background: #004aad; color: white; border: none; padding: 10px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; text-align: center; }
+        
+        .schedule-panel {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(255, 255, 255, 0.98); z-index: 2000; padding: 30px;
+            display: none; flex-direction: column; gap: 20px; overflow-y: auto;
+        }
+        .schedule-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px; }
+        .close-btn { background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; }
+        th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: left; }
+        th { background: #004aad; color: white; }
+        tr:nth-child(even) { background: #f9fafb; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <div class="header">
+            <span class="title">Dahod Mini Bus</span>
+            <span class="status-badge">Live Fleet: <span id="counter">0</span></span>
+        </div>
+        <select id="routeDropdown">
+            <option value="all">All Vehicles</option>
+            <option value="Route 1 - Central Hub Line">Route 1 - Central Hub Line</option>
+            <option value="Route 2 - Northern Residential Line">Route 2 - Northern Residential Line</option>
+            <option value="Route 3 - East Market Loop">Route 3 - East Market Loop</option>
+        </select>
+        <button class="btn-schedule" onclick="toggleSchedule(true)">Schedule Timetable</button>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="schedulePanel" class="schedule-panel">
+        <div class="schedule-header">
+            <h2>Dahod Smart Transit - Master Operations Board</h2>
+            <button class="close-btn" onclick="toggleSchedule(false)">Back To Live Tracking</button>
+        </div>
+        <table>
+            <thead>
+                <tr><th>Route Line ID</th><th>Origin Base</th><th>Destination Terminal</th><th>Frequency</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                <tr><td style="color:#dc2626; font-weight:bold;">Route 1</td><td>Dahod Railway Station</td><td>Swami Vivekanand Circle</td><td>Every 10 Mins</td><td><span style="color:green; font-weight:bold;">● Active</span></td></tr>
+                <tr><td style="color:#2563eb; font-weight:bold;">Route 2</td><td>GSRTC Central Depot</td><td>Muvaliya Corner Bypass</td><td>Every 15 Mins</td><td><span style="color:green; font-weight:bold;">● Active</span></td></tr>
+                <tr><td style="color:#16a34a; font-weight:bold;">Route 3</td><td>Godhra Road Entrance</td><td>Indore Highway Junction</td><td>Every 12 Mins</td><td><span style="color:green; font-weight:bold;">● Active</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let currentFilter = "all";
+        const visibleFleet = {};
+        const activeBusRoutes = {}; 
+
+        window.onload = function() {
+            // Updated viewport centering to properly incorporate the GEC campus boundaries
+            const map = L.map('map', { zoomControl: false }).setView([22.8460, 74.2490], 14);
+            L.control.zoom({ position: 'topright' }).addTo(map);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            const busStandIcon = L.divIcon({
+                className: 'bus-pin',
+                html: '<div style="display: flex; flex-direction: column; align-items: center;"><div style="background: #1e40af; color: white; padding: 4px 8px; font-size: 10px; border-radius: 4px; font-weight: bold; border: 1px solid white; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.25);">🚌 Bus Stop</div><div style="width: 2px; height: 12px; background: #1f2937;"></div></div>',
+                iconSize: [60, 30], iconAnchor: [30, 27]
+            });
+
+            // Route 2 coordinates updated to seamlessly map through the Engineering Campus node
+            const routesData = {
+                "Route 1 - Central Hub Line": { color: "#dc2626", stops: [[22.8251, 74.2634], [22.8285, 74.2588], [22.8335, 74.2561], [22.8368, 74.2515], [22.8384, 74.2492]] },
+                "Route 2 - Northern Residential Line": { color: "#2563eb", stops: [[22.8335, 74.2561], [22.8395, 74.2582], [22.8450, 74.2610], [22.8512, 74.2635], [22.8557, 74.2420], [22.8568, 74.2660]] },
+                "Route 3 - East Market Loop": { color: "#16a34a", stops: [[22.8435, 74.2421], [22.8380, 74.2385], [22.8295, 74.2440], [22.8240, 74.2510], [22.8215, 74.2590]] }
+            };
+
+            Object.keys(routesData).forEach(name => {
+                const r = routesData[name];
+                const pathCoordinates = [];
+                r.stops.forEach(pos => {
+                    pathCoordinates.push(pos);
+                    L.marker(pos, { icon: busStandIcon }).addTo(map);
+                });
+                L.polyline(pathCoordinates, { color: r.color, weight: 4, opacity: 0.6, dashArray: '5, 8' }).addTo(map);
+            });
+
+            // Injection of the dedicated high-visibility Government Engineering College Terminus pin
+            const gecIcon = L.divIcon({
+                className: 'gec-pin',
+                html: '<div style="display: flex; flex-direction: column; align-items: center;"><div style="background: #e11d48; color: white; padding: 6px 10px; font-size: 11px; border-radius: 6px; font-weight: bold; border: 2px solid white; white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,0.3);">🎓 GEC Dahod Terminus</div><div style="width: 3px; height: 10px; background: #e11d48;"></div></div>',
+                iconSize: [120, 35], iconAnchor: [60, 32]
+            });
+            L.marker([22.8557, 74.2420], { icon: gecIcon }).addTo(map).bindPopup('<b>Government Engineering College Terminal</b><br>Route 2 Operational Node.');
+
+            document.getElementById("routeDropdown").addEventListener("change", function(e) {
+                currentFilter = e.target.value;
+                updateMarkerVisibilities();
+            });
+
+            function updateMarkerVisibilities() {
+                let displayedCount = 0;
+                Object.keys(visibleFleet).forEach(id => {
+                    if (currentFilter === "all" || activeBusRoutes[id] === currentFilter) {
+                        visibleFleet[id].addTo(map);
+                        displayedCount++;
+                    } else {
+                        map.removeLayer(visibleFleet[id]);
+                    }
+                });
+                document.getElementById('counter').innerText = displayedCount;
+            }
+
+            const socket = io({ transports: ['polling', 'websocket'] });
+
+            socket.on('fleet_update', function(data) {
+                const id = data.bus_id;
+                const newPos = [data.latitude, data.longitude];
+                activeBusRoutes[id] = data.route;
+
+                if (visibleFleet[id]) {
+                    const oldPos = visibleFleet[id].getLatLng();
+                    const bearingAngle = Math.atan2(newPos[1] - oldPos.lng, newPos[0] - oldPos.lat) * (180 / Math.PI);
+                    visibleFleet[id].setIcon(createDirectionalIcon(bearingAngle));
+                    animateMarker(visibleFleet[id], oldPos, L.latLng(newPos), 1000);
+                } else {
+                    visibleFleet[id] = L.marker(newPos, { icon: createDirectionalIcon(0) });
+                    if (currentFilter === "all" || data.route === currentFilter) visibleFleet[id].addTo(map);
+                    visibleFleet[id].bindPopup('<b>Bus ID: ' + id + '</b>');
+                }
+                updateMarkerVisibilities();
+            });
+
+            function createDirectionalIcon(angle) {
+                return L.divIcon({
+                    className: 'live-bus-dir',
+                    html: '<div style="background: #004aad; color: white; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2.5px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.3); transform: rotate(' + angle + 'deg); position: relative;"><div style="position: absolute; top: -8px; font-size: 14px; color: #004aad; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;">▲</div>B</div>',
+                    iconSize: [36, 36], iconAnchor: [18, 18]
+                });
+            }
+
+            function animateMarker(marker, startPos, endPos, duration) {
+                const startTime = performance.now();
+                function step(now) {
+                    const elapsed = now - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    marker.setLatLng([startPos.lat + (endPos.lat - startPos.lat) * progress, startPos.lng + (endPos.lng - startPos.lng) * progress]);
+                    if (progress < 1) requestAnimationFrame(step);
+                }
+                requestAnimationFrame(step);
+            }
+        };
+
+        function toggleSchedule(show) { document.getElementById("schedulePanel").style.display = show ? "flex" : "none"; }
+    </script>
+</body>
+</html>

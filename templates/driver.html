@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Console - Dahod Mini Bus</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #f3f4f6; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 360px; text-align: center; }
+        h2 { margin-bottom: 20px; color: #111827; }
+        input, select { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; background: #004aad; color: white; }
+        .tracking { background: #dc2626 !important; }
+        .status { margin-top: 15px; font-weight: bold; font-size: 14px; }
+        .error-msg { color: #dc2626; font-size: 14px; margin-bottom: 10px; display: none; font-weight: 500; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Driver Tracking Console</h2>
+        <div id="loginForm">
+            <div id="errorBox" class="error-msg"></div>
+            <input type="text" id="busNumber" placeholder="Enter Bus Number (e.g. GJ-20-B-1001)">
+            <input type="password" id="driverPassword" placeholder="Enter Shift Password">
+            <select id="routeSelect">
+                <option value="Route 1 - Central Hub Line">Route 1 - Central Hub Line</option>
+                <option value="Route 2 - Northern Residential Line">Route 2 - Northern Residential Line</option>
+                <option value="Route 3 - East Market Loop">Route 3 - East Market Loop</option>
+            </select>
+            <button onclick="startDriverSession()">Start Route Shift</button>
+        </div>
+        
+        <div id="trackingState" style="display:none;">
+            <h3 style="color:#166534;">● Live Tracking Active</h3>
+            <p style="margin-top:10px;">Bus ID: <span id="lblBus" style="font-weight:bold;"></span></p>
+            <p>Route: <span id="lblRoute" style="font-weight:bold;"></span></p>
+            <div id="gpsCoords" class="status">Waiting for GPS lock...</div>
+            <br>
+            <button class="tracking" onclick="stopDriverSession()">End Route Shift</button>
+        </div>
+    </div>
+
+    <script>
+        let watchId = null;
+        let busId = "";
+        let assignedRoute = "";
+
+        function startDriverSession() {
+            busId = document.getElementById("busNumber").value.trim().toUpperCase();
+            const pass = document.getElementById("driverPassword").value;
+            assignedRoute = document.getElementById("routeSelect").value;
+            const errorBox = document.getElementById("errorBox");
+            
+            errorBox.style.display = "none";
+            
+            if(!busId || !pass) { 
+                errorBox.innerText = "Please enter both Bus Number and Password";
+                errorBox.style.display = "block";
+                return; 
+            }
+            
+            fetch('/api/driver/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ bus_number: busId, route_name: assignedRoute, password: pass })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    document.getElementById("loginForm").style.display = "none";
+                    document.getElementById("trackingState").style.display = "block";
+                    document.getElementById("lblBus").innerText = busId;
+                    document.getElementById("lblRoute").innerText = assignedRoute;
+                    
+                    initiateGpsTracking();
+                } else {
+                    errorBox.innerText = data.message || "Authentication Failed";
+                    errorBox.style.display = "block";
+                }
+            })
+            .catch(() => {
+                errorBox.innerText = "Server Connection Error";
+                errorBox.style.display = "block";
+            });
+        }
+
+        function initiateGpsTracking() {
+            if ("geolocation" in navigator) {
+                watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        document.getElementById("gpsCoords").innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
+                        
+                        fetch('/api/driver/ping', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ bus_id: busId, route: assignedRoute, latitude: lat, longitude: lng })
+                        });
+                    },
+                    (error) => { document.getElementById("gpsCoords").innerText = "GPS Access Denied/Error"; },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            } else { alert("GPS hardware tracking not supported on this device."); }
+        }
+
+        function stopDriverSession() {
+            if(watchId) navigator.geolocation.clearWatch(watchId);
+            location.reload();
+        }
+    </script>
+</body>
+</html>
