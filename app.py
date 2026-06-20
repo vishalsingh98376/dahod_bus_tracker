@@ -6,7 +6,8 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dahod_minibus_secret_key_2026'
 
 # Threading mode is explicitly set to ensure local Anaconda runtime stability
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# New code (allows auto-detection of eventlet on Render)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 active_drivers = {}
 DRIVER_PASSWORD = "dahod2026"
