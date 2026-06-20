@@ -1,12 +1,6 @@
-import eventlet
-eventlet.monkey_patch()
-
 import os
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
-
-app = Flask(__name__)
-# ... (rest of your existing code stays exactly the same)
 
 
 app = Flask(__name__)
@@ -70,8 +64,5 @@ def process_mobile_telemetry():
     return jsonify({"status": "live"}), 200
 
 if __name__ == '__main__':
-    # Render assigns a port dynamically via environment variables
     port = int(os.environ.get("PORT", 5002))
-    
-    # Use 0.0.0.0 to listen to external production traffic
     socketio.run(app, host='0.0.0.0', port=port)
