@@ -87,11 +87,19 @@
 
         function initiateGpsTracking() {
             if ("geolocation" in navigator) {
+                // Fixed configurations to permit relaxed Wi-Fi routing for computers
+                const geoOptions = { 
+                    enableHighAccuracy: false, 
+                    timeout: 15000, 
+                    maximumAge: 10000 
+                };
+
                 watchId = navigator.geolocation.watchPosition(
                     (position) => {
                         const lat = position.coords.latitude;
                         const lng = position.coords.longitude;
                         document.getElementById("gpsCoords").innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
+                        document.getElementById("gpsCoords").style.color = "#111827"; 
                         
                         fetch('/api/driver/ping', {
                             method: 'POST',
@@ -99,10 +107,20 @@
                             body: JSON.stringify({ bus_id: busId, route: assignedRoute, latitude: lat, longitude: lng })
                         });
                     },
-                    (error) => { document.getElementById("gpsCoords").innerText = "GPS Access Denied/Error"; },
-                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                    (error) => { 
+                        console.error("Geolocation error details:", error);
+                        if (error.code === error.TIMEOUT) {
+                            document.getElementById("gpsCoords").innerText = "GPS Timeout. Searching for location signal...";
+                        } else {
+                            document.getElementById("gpsCoords").innerText = "GPS Access Denied/Error";
+                        }
+                        document.getElementById("gpsCoords").style.color = "#dc2626";
+                    },
+                    geoOptions
                 );
-            } else { alert("GPS hardware tracking not supported on this device."); }
+            } else { 
+                alert("GPS hardware tracking not supported on this device."); 
+            }
         }
 
         function stopDriverSession() {
