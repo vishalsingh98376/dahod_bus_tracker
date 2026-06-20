@@ -1,6 +1,13 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
+
+app = Flask(__name__)
+# ... (rest of your existing code stays exactly the same)
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dahod_minibus_secret_key_2026'
